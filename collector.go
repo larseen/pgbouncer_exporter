@@ -16,6 +16,7 @@ import (
 var (
 	metricMaps = map[string]map[string]ColumnMapping{
 		"stats": {
+			"database":                  {LABEL, ""},
 			"avg_query_count":           {GAUGE, "Average queries per second in last stat period"},
 			"avg_query":                 {GAUGE, "The average query duration, shown as microsecond"},
 			"avg_query_time":            {GAUGE, "Average query duration in microseconds"},
@@ -37,6 +38,8 @@ var (
 			"total_xact_time":           {GAUGE, "Total number of microseconds spent by pgbouncer when connected to PostgreSQL in a transaction, either idle in transaction or executing queries"},
 		},
 		"pools": {
+			"database":   {LABEL, ""},
+			"user":       {LABEL, ""},
 			"cl_active":  {GAUGE, "Client connections linked to server connection and able to process queries, shown as connection"},
 			"cl_waiting": {GAUGE, "Client connections waiting on a server connection, shown as connection"},
 			"sv_active":  {GAUGE, "Server connections linked to a client connection, shown as connection"},
@@ -45,6 +48,7 @@ var (
 			"sv_tested":  {GAUGE, "Server connections currently running either server_reset_query or server_check_query, shown as connection"},
 			"sv_login":   {GAUGE, "Server connections currently in the process of logging in, shown as connection"},
 			"maxwait":    {GAUGE, "Age of oldest unserved client connection, shown as second"},
+			"pool_mode":  {LABEL, ""},
 		},
 	}
 )
@@ -121,21 +125,21 @@ func queryNamespaceMapping(ch chan<- prometheus.Metric, db *sql.DB, namespace st
 	nonfatalErrors := []error{}
 
 	for rows.Next() {
-		var database string
 		err = rows.Scan(scanArgs...)
 		if err != nil {
 			return []error{}, errors.New(fmt.Sprintln("Error retrieving rows:", namespace, err))
+		}
+
+		labelValues := []string{}
+		// collect label data first.
+		for _, name := range mapping.labels {
+			labelValues = append(labelValues, columnData[columnIdx[name]].(string))
 		}
 
 		// Loop over column names, and match to scan data. Unknown columns
 		// will be filled with an untyped metric number *if* they can be
 		// converted to float64s. NULLs are allowed and treated as NaN.
 		for idx, columnName := range columnNames {
-
-			if columnName == "database" {
-				log.Debug("Fetching data for row belonging to database ", columnData[idx])
-				database = columnData[idx].(string)
-			}
 
 			if metricMapping, ok := mapping.columnMappings[columnName]; ok {
 				// Is this a metricy metric?
@@ -149,7 +153,7 @@ func queryNamespaceMapping(ch chan<- prometheus.Metric, db *sql.DB, namespace st
 					continue
 				}
 				// Generate the metric
-				ch <- prometheus.MustNewConstMetric(metricMapping.desc, metricMapping.vtype, value, database)
+				ch <- prometheus.MustNewConstMetric(metricMapping.desc, metricMapping.vtype, value, labelValues...)
 			}
 		}
 	}
@@ -312,13 +316,19 @@ func makeDescMap(metricMaps map[string]map[string]ColumnMapping, namespace strin
 	for metricNamespace, mappings := range metricMaps {
 		thisMap := make(map[string]MetricMap)
 
+		labels := []string{}
+		for columnName, columnMapping := range mappings {
+			if columnMapping.usage == LABEL {
+				labels = append(labels, columnName)
+			}
+		}
 		for columnName, columnMapping := range mappings {
 			// Determine how to convert the column based on its usage.
 			switch columnMapping.usage {
 			case COUNTER:
 				thisMap[columnName] = MetricMap{
 					vtype: prometheus.CounterValue,
-					desc:  prometheus.NewDesc(fmt.Sprintf("%s_%s_%s", namespace, metricNamespace, columnName), columnMapping.description, []string{"database"}, nil),
+					desc:  prometheus.NewDesc(fmt.Sprintf("%s_%s_%s", namespace, metricNamespace, columnName), columnMapping.description, labels, nil),
 					conversion: func(in interface{}) (float64, bool) {
 						return dbToFloat64(in)
 					},
@@ -326,7 +336,7 @@ func makeDescMap(metricMaps map[string]map[string]ColumnMapping, namespace strin
 			case GAUGE:
 				thisMap[columnName] = MetricMap{
 					vtype: prometheus.GaugeValue,
-					desc:  prometheus.NewDesc(fmt.Sprintf("%s_%s_%s", namespace, metricNamespace, columnName), columnMapping.description, []string{"database"}, nil),
+					desc:  prometheus.NewDesc(fmt.Sprintf("%s_%s_%s", namespace, metricNamespace, columnName), columnMapping.description, labels, nil),
 					conversion: func(in interface{}) (float64, bool) {
 						return dbToFloat64(in)
 					},
@@ -334,7 +344,7 @@ func makeDescMap(metricMaps map[string]map[string]ColumnMapping, namespace strin
 			}
 		}
 
-		metricMap[metricNamespace] = MetricMapNamespace{thisMap}
+		metricMap[metricNamespace] = MetricMapNamespace{thisMap, labels}
 	}
 
 	return metricMap
