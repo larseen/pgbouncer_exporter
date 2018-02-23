@@ -44,3 +44,9 @@ pools.sv_used | Server connections idle more than server_check_delay, needing se
 pools.sv_tested | Server connections currently running either server_reset_query or server_check_query, shown as connection
 pools.sv_login | Server connections currently in the process of logging in, shown as connection
 pools.maxwait | Age of oldest unserved client connection, shown as second
+databases.pool_size | Maximum number of pool backend connections
+databases.reserver_pool | Maximum amount that the pool size can be exceeded temporarily
+databases.max_connections | Maximum number of client connections allowed
+databases.current_connections | Current number of client connections
+databases.paused | Boolean indicating whether a pgbouncer PAUSE is currently active for this database
+databases.disabled | Boolean indicating whether a pgbouncer DISABLE is currently active for this database

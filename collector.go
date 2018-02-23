@@ -50,6 +50,20 @@ var (
 			"maxwait":    {GAUGE, "Age of oldest unserved client connection, shown as second"},
 			"pool_mode":  {LABEL, ""},
 		},
+		"databases": {
+			"name":                {LABEL, ""},
+			"host":                {LABEL, ""},
+			"port":                {LABEL, ""},
+			"database":            {LABEL, ""},
+			"force_user":          {LABEL, ""},
+			"pool_size":           {GAUGE, "Maximum number of pool backend connections"},
+			"reserve_pool":        {GAUGE, "Maximum amount that the pool size can be exceeded temporarily"},
+			"pool_mode":           {LABEL, ""},
+			"max_connections":     {GAUGE, "Maximum number of client connections allowed"},
+			"current_connections": {GAUGE, "Current number of client connections"},
+			"paused":              {GAUGE, "Boolean indicating whether a pgbouncer PAUSE is currently active for this database"},
+			"disabled":            {GAUGE, "Boolean indicating whether a pgbouncer DISABLE is currently active for this database"},
+		},
 	}
 )
 
@@ -133,7 +147,14 @@ func queryNamespaceMapping(ch chan<- prometheus.Metric, db *sql.DB, namespace st
 		labelValues := []string{}
 		// collect label data first.
 		for _, name := range mapping.labels {
-			labelValues = append(labelValues, columnData[columnIdx[name]].(string))
+			val := columnData[columnIdx[name]]
+			if val == nil {
+				labelValues = append(labelValues, "")
+			} else if v, ok := val.(string); ok {
+				labelValues = append(labelValues, v)
+			} else if v, ok := val.(int64); ok {
+				labelValues = append(labelValues, strconv.FormatInt(v, 10))
+			}
 		}
 
 		// Loop over column names, and match to scan data. Unknown columns
