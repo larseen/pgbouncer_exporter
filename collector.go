@@ -212,9 +212,6 @@ func queryNamespaceMapping(ch chan<- prometheus.Metric, db *sql.DB, namespace st
 			}
 		}
 
-		// Loop over column names, and match to scan data. Unknown columns
-		// will be filled with an untyped metric number *if* they can be
-		// converted to float64s. NULLs are allowed and treated as NaN.
 		for idx, columnName := range columnNames {
 
 			if metricMapping, ok := mapping.columnMappings[columnName]; ok {
