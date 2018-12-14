@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"sync"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -13,29 +14,73 @@ import (
 	"github.com/prometheus/common/log"
 )
 
+type columnUsage int
+
+const (
+	LABEL    columnUsage = iota // Use this column as a label
+	COUNTER  columnUsage = iota // Use this column as a counter
+	GAUGE    columnUsage = iota // Use this column as a gauge
+	GAUGE_MS columnUsage = iota // Use this column for gauges that are microsecond data
+)
+
+// Groups metric maps under a shared set of labels
+type MetricMapNamespace struct {
+	columnMappings map[string]MetricMap // Column mappings in this namespace
+	labels         []string
+}
+
+// Stores the prometheus metric description which a given column will be mapped
+// to by the collector
+type MetricMap struct {
+	vtype      prometheus.ValueType // Prometheus valuetype
+	namespace  string
+	desc       *prometheus.Desc // Prometheus descriptor
+	multiplier float64          // This is a multiplier to apply pgbouncer values in converting to prometheus norms.
+}
+
+type ColumnMapping struct {
+	usage       columnUsage `yaml:"usage"`
+	description string      `yaml:"description"`
+}
+
+// Exporter collects PgBouncer stats from the given server and exports
+// them using the prometheus metrics package.
+type Exporter struct {
+	connectionString string
+	namespace        string
+	mutex            sync.RWMutex
+
+	duration, up, error prometheus.Gauge
+	totalScrapes        prometheus.Counter
+
+	metricMap map[string]MetricMapNamespace
+
+	db *sql.DB
+}
+
 var (
 	metricMaps = map[string]map[string]ColumnMapping{
 		"stats": {
 			"database":                  {LABEL, ""},
 			"avg_query_count":           {GAUGE, "Average queries per second in last stat period"},
-			"avg_query":                 {GAUGE, "The average query duration, shown as microsecond"},
-			"avg_query_time":            {GAUGE, "Average query duration in microseconds"},
+			"avg_query":                 {GAUGE_MS, "The average query duration, shown as microsecond"},
+			"avg_query_time":            {GAUGE_MS, "Average query duration in microseconds"},
 			"avg_recv":                  {GAUGE, "Average received (from clients) bytes per second"},
 			"avg_req":                   {GAUGE, "The average number of requests per second in last stat period, shown as request/second"},
 			"avg_sent":                  {GAUGE, "Average sent (to clients) bytes per second"},
-			"avg_wait_time":             {GAUGE, "Time spent by clients waiting for a server in microseconds (average per second)"},
+			"avg_wait_time":             {GAUGE_MS, "Time spent by clients waiting for a server in microseconds (average per second)"},
 			"avg_xact_count":            {GAUGE, "Average transactions per second in last stat period"},
-			"avg_xact_time":             {GAUGE, "Average transaction duration in microseconds"},
+			"avg_xact_time":             {GAUGE_MS, "Average transaction duration in microseconds"},
 			"bytes_received_per_second": {GAUGE, "The total network traffic received, shown as byte/second"},
 			"bytes_sent_per_second":     {GAUGE, "The total network traffic sent, shown as byte/second"},
 			"total_query_count":         {GAUGE, "Total number of SQL queries pooled"},
-			"total_query_time":          {GAUGE, "Total number of microseconds spent by pgbouncer when actively connected to PostgreSQL, executing queries"},
+			"total_query_time":          {GAUGE_MS, "Total number of microseconds spent by pgbouncer when actively connected to PostgreSQL, executing queries"},
 			"total_received":            {GAUGE, "Total volume in bytes of network traffic received by pgbouncer, shown as bytes"},
 			"total_requests":            {GAUGE, "Total number of SQL requests pooled by pgbouncer, shown as requests"},
 			"total_sent":                {GAUGE, "Total volume in bytes of network traffic sent by pgbouncer, shown as bytes"},
-			"total_wait_time":           {GAUGE, "Time spent by clients waiting for a server in microseconds"},
+			"total_wait_time":           {GAUGE_MS, "Time spent by clients waiting for a server in microseconds"},
 			"total_xact_count":          {GAUGE, "Total number of SQL transactions pooled"},
-			"total_xact_time":           {GAUGE, "Total number of microseconds spent by pgbouncer when connected to PostgreSQL in a transaction, either idle in transaction or executing queries"},
+			"total_xact_time":           {GAUGE_MS, "Total number of microseconds spent by pgbouncer when connected to PostgreSQL in a transaction, either idle in transaction or executing queries"},
 		},
 		"pools": {
 			"database":   {LABEL, ""},
@@ -169,7 +214,7 @@ func queryNamespaceMapping(ch chan<- prometheus.Metric, db *sql.DB, namespace st
 					continue
 				}
 				// Generate the metric
-				ch <- prometheus.MustNewConstMetric(metricMapping.desc, metricMapping.vtype, value, labelValues...)
+				ch <- prometheus.MustNewConstMetric(metricMapping.desc, metricMapping.vtype, value*metricMapping.multiplier, labelValues...)
 			}
 		}
 	}
@@ -344,16 +389,25 @@ func makeDescMap(metricMaps map[string]map[string]ColumnMapping, namespace strin
 		}
 		for columnName, columnMapping := range mappings {
 			// Determine how to convert the column based on its usage.
+			desc := prometheus.NewDesc(fmt.Sprintf("%s_%s_%s", namespace, metricNamespace, columnName), columnMapping.description, labels, nil)
 			switch columnMapping.usage {
 			case COUNTER:
 				thisMap[columnName] = MetricMap{
-					vtype: prometheus.CounterValue,
-					desc:  prometheus.NewDesc(fmt.Sprintf("%s_%s_%s", namespace, metricNamespace, columnName), columnMapping.description, labels, nil),
+					vtype:      prometheus.CounterValue,
+					desc:       desc,
+					multiplier: 1,
 				}
 			case GAUGE:
 				thisMap[columnName] = MetricMap{
-					vtype: prometheus.GaugeValue,
-					desc:  prometheus.NewDesc(fmt.Sprintf("%s_%s_%s", namespace, metricNamespace, columnName), columnMapping.description, labels, nil),
+					vtype:      prometheus.GaugeValue,
+					desc:       desc,
+					multiplier: 1,
+				}
+			case GAUGE_MS:
+				thisMap[columnName] = MetricMap{
+					vtype:      prometheus.GaugeValue,
+					desc:       desc,
+					multiplier: 1e-6,
 				}
 			}
 		}
