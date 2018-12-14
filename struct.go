@@ -77,7 +77,6 @@ type MetricMap struct {
 	vtype      prometheus.ValueType // Prometheus valuetype
 	namespace  string
 	desc       *prometheus.Desc                  // Prometheus descriptor
-	conversion func(interface{}) (float64, bool) // Conversion function to turn PG result into float64
 }
 
 type ColumnMapping struct {

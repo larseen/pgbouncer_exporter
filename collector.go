@@ -350,17 +350,11 @@ func makeDescMap(metricMaps map[string]map[string]ColumnMapping, namespace strin
 				thisMap[columnName] = MetricMap{
 					vtype: prometheus.CounterValue,
 					desc:  prometheus.NewDesc(fmt.Sprintf("%s_%s_%s", namespace, metricNamespace, columnName), columnMapping.description, labels, nil),
-					conversion: func(in interface{}) (float64, bool) {
-						return dbToFloat64(in)
-					},
 				}
 			case GAUGE:
 				thisMap[columnName] = MetricMap{
 					vtype: prometheus.GaugeValue,
 					desc:  prometheus.NewDesc(fmt.Sprintf("%s_%s_%s", namespace, metricNamespace, columnName), columnMapping.description, labels, nil),
-					conversion: func(in interface{}) (float64, bool) {
-						return dbToFloat64(in)
-					},
 				}
 			}
 		}
