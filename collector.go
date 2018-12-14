@@ -223,8 +223,11 @@ func queryNamespaceMapping(ch chan<- prometheus.Metric, db *sql.DB, namespace st
 					nonfatalErrors = append(nonfatalErrors, errors.New(fmt.Sprintln("Unexpected error parsing column: ", namespace, columnName, columnData[idx])))
 					continue
 				}
+				log.Debugln("successfully parsed column:", namespace, columnName, columnData[idx])
 				// Generate the metric
 				ch <- prometheus.MustNewConstMetric(metricMapping.desc, metricMapping.vtype, value*metricMapping.multiplier, labelValues...)
+			} else {
+				log.Debugln("Ignoring column for metric conversion:",namespace, columnName)
 			}
 		}
 	}
