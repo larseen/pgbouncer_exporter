@@ -163,11 +163,6 @@ func queryNamespaceMapping(ch chan<- prometheus.Metric, db *sql.DB, namespace st
 		for idx, columnName := range columnNames {
 
 			if metricMapping, ok := mapping.columnMappings[columnName]; ok {
-				// Is this a metricy metric?
-				if metricMapping.discard {
-					continue
-				}
-
 				value, ok := dbToFloat64(columnData[idx])
 				if !ok {
 					nonfatalErrors = append(nonfatalErrors, errors.New(fmt.Sprintln("Unexpected error parsing column: ", namespace, columnName, columnData[idx])))
