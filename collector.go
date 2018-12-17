@@ -441,13 +441,22 @@ func (e *Exporter) scrape(ch chan<- prometheus.Metric) {
 		e.duration.Set(time.Since(begun).Seconds())
 		log.Info("Ending scrape")
 	}(time.Now())
+
 	log.Info("Starting scrape")
+	e.mutex.RLock()
+	defer e.mutex.RUnlock()
 
 	e.error.Set(0)
 	e.totalScrapes.Inc()
 
-	e.mutex.RLock()
-	defer e.mutex.RUnlock()
+	if err := e.db.Ping(); err != nil {
+		log.Errorf("Backend is down, failed to connect: %s", err)
+		e.error.Set(1)
+		e.up.Set(0)
+		return
+	}
+	log.Debug("Backend is up, proceeding with scrape")
+	e.up.Set(1)
 
 	for _, mapping := range e.metricMap {
 		nonfatal, err := mapping.Query(ch, e.db)
