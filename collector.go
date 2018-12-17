@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/log"
 )
@@ -331,14 +331,12 @@ func NewExporter(connectionString string, namespace string) *Exporter {
 // Query within a namespace mapping and emit metrics. Returns fatal errors if
 
 func getDB(conn string) (*sql.DB, error) {
-	db, err := sql.Open("postgres", conn)
+	// Note we use OpenDB so we can still create the connector even if the backend is down.
+	connector, err := pq.NewConnector(conn)
 	if err != nil {
 		return nil, err
 	}
-	err = db.Ping()
-	if err != nil {
-		return nil, err
-	}
+	db := sql.OpenDB(connector)
 
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
